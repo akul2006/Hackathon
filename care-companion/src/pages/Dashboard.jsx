@@ -5,6 +5,7 @@ import { Heart, Bell, Home, Calendar, BarChart2, Activity, User, LogOut,
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ProfileForm from './ProfileForm'
 import { CONDITION_TASKS, getMissedMeds, getUpcomingMed } from '../data/conditionTasks'
+import { loadFromLocalStorage, saveToLocalStorage } from './storage'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -445,32 +446,68 @@ const getTodayDateString = () => new Date().toISOString().slice(0, 10);
 export default function Dashboard({ profile, user, onLogout }) {
   const [tab, setTab] = useState('home')
   const [currentProfile, setCurrentProfile] = useState(profile)
-  const [checked, setChecked] = useState({});
-  const [streak, setStreak] = useState(1);
+
+  // Load initial state from localStorage
+  const username = (user?.name || currentProfile.name).toLowerCase();
+  const todayDate = getTodayDateString();
+
+  const [checked, setChecked] = useState(() => {
+    const savedChecked = loadFromLocalStorage(`careCompanionCheckedTasks_${username}_${todayDate}`);
+    return savedChecked || {};
+  });
+  const [streak, setStreak] = useState(() => {
+    const savedStreak = loadFromLocalStorage(`careCompanionStreak_${username}`);
+    return savedStreak !== undefined ? savedStreak : 1;
+  });
   const [showPopup, setShowPopup] = useState(false)
-  const [popupShownToday, setPopupShownToday] = useState(false);
+  const [popupShownToday, setPopupShownToday] = useState(() => {
+    const savedPopupShown = loadFromLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`);
+    return savedPopupShown || false;
+  });
 
   useEffect(() => {
     setCurrentProfile(profile)
   }, [profile])
 
-  const handleProfileUpdate = async (updatedData) => {
-    const oldUsername = user?.name || currentProfile.name;
-    try {
-      const response = await fetch(`http://localhost:3001/api/profile/${encodeURIComponent(oldUsername)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedData),
-      });
+  // Save states to localStorage whenever they change
+  useEffect(() => {
+    saveToLocalStorage(`careCompanionCheckedTasks_${username}_${todayDate}`, checked);
+  }, [checked, username, todayDate]);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to update profile:', errorData.message);
-        return;
+  useEffect(() => {
+    saveToLocalStorage(`careCompanionStreak_${username}`, streak);
+  }, [streak, username]);
+
+  useEffect(() => {
+    saveToLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`, popupShownToday);
+  }, [popupShownToday, username, todayDate]);
+
+  const handleProfileUpdate = (updatedData) => {
+    const users = loadFromLocalStorage('careCompanionUsers') || {};
+    const oldUsernameKey = (user?.name || currentProfile.name).toLowerCase();
+    const newDisplayName = updatedData.name.trim();
+    const newUsernameKey = newDisplayName.toLowerCase();
+
+    const currentUserData = users[oldUsernameKey];
+
+    if (currentUserData) {
+      const updatedUserData = {
+        ...currentUserData,
+        name: newDisplayName,
+        profile: updatedData,
+      };
+
+      if (oldUsernameKey !== newUsernameKey) {
+        if (users[newUsernameKey]) {
+          console.error('A user with this name already exists.');
+          return;
+        }
+        delete users[oldUsernameKey];
+        users[newUsernameKey] = updatedUserData;
+      } else {
+        users[oldUsernameKey] = updatedUserData;
       }
-    } catch (error) {
-      console.error('Profile update network error:', error);
-      return;
+      saveToLocalStorage('careCompanionUsers', users);
     }
     setCurrentProfile(updatedData);
     setTab('home');

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Heart, Eye, EyeOff, UserPlus } from 'lucide-react'
+import { saveToLocalStorage, loadFromLocalStorage } from './storage'
 
 const Field = ({ label, name, type = 'text', value, onChange, error, placeholder, rightEl }) => (
   <div>
@@ -33,29 +34,30 @@ export default function SignUp({ onSubmit, onLogin }) {
     return e
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
 
-    try {
-      const response = await fetch('http://localhost:3001/api/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name.trim(), mobile: form.mobile, password: form.password }),
-      });
+    const users = loadFromLocalStorage('careCompanionUsers') || {}
+    const displayName = form.name.trim()
+    const storageKey = displayName.toLowerCase()
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setErrors({ name: data.message || 'Registration failed.' });
-      } else {
-        onSubmit(data); // Pass the new user object from the backend
-      }
-    } catch (error) {
-      console.error('Signup network error:', error);
-      setErrors({ name: 'Could not connect to the server.' });
+    if (users[storageKey]) {
+      setErrors({ name: 'Account with this name already exists.' })
+      return
     }
+
+    const newUser = {
+      name: displayName,
+      mobile: form.mobile,
+      password: form.password, // In a real app, this would be hashed
+      profile: { name: displayName, age: '', condition: '', meds: [] }
+    }
+
+    users[storageKey] = newUser
+    saveToLocalStorage('careCompanionUsers', users)
+    onSubmit(newUser)
   }
 
   return (
