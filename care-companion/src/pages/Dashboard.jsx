@@ -194,17 +194,33 @@ function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
 // ── Schedule Tab ──────────────────────────────────────────────────────────────
 function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdateRoutines }) {
   const [showManage, setShowManage] = useState(false)
+  const [selectedDayIdx, setSelectedDayIdx] = useState(() => new Date().getDay())
+  const [weekOffset, setWeekOffset] = useState(0)
+
   const today = new Date()
-  const todayIdx = today.getDay()
+  const todayDayIdx = today.getDay()
+
+  // Build the week based on offset (0 = current week)
+  const weekStart = new Date(today)
+  weekStart.setDate(today.getDate() - todayDayIdx + weekOffset * 7)
+
   const weekDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today); d.setDate(today.getDate() - todayIdx + i)
-    return { label: DAYS_SHORT[i], date: d.getDate(), isToday: i === todayIdx }
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i)
+    const isToday = d.toDateString() === today.toDateString()
+    return { label: DAYS_SHORT[i], date: d.getDate(), fullDate: d, isToday, dayIdx: i }
   })
+
+  const selectedDay = weekDays[selectedDayIdx] || weekDays[todayDayIdx]
+  const selectedDayName = DAYS_SHORT[selectedDayIdx] // e.g. 'Mon'
 
   const allCondTasks = CONDITION_TASKS[profile.condition] || []
   const deletedRoutines = profile.deletedRoutines || []
   const condTasks = allCondTasks.filter(t => !deletedRoutines.includes(t.id))
-  const medTasks = profile.meds.map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
+
+  // Filter meds that are scheduled for the selected day
+  const medTasks = profile.meds
+    .filter(m => m.days.includes(selectedDayName))
+    .map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...medTasks, ...condTasks]
 
   const handleDeleteMed = (index) => {
@@ -217,26 +233,53 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
 
   return (
     <div className="space-y-5">
-      {/* Week strip */}
+      {/* Week strip with navigation */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <div className="flex gap-2 justify-between">
-          {weekDays.map((d, i) => (
-            <div key={i} className={`flex flex-col items-center px-3 py-2 rounded-xl text-sm font-semibold transition
-              ${d.isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
-              <span className="text-xs">{d.label}</span>
-              <span className="text-base font-bold">{d.date}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setWeekOffset(w => w - 1)}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition shrink-0">
+            ‹
+          </button>
+          <div className="flex gap-1 flex-1 justify-between">
+            {weekDays.map((d, i) => (
+              <button key={i} onClick={() => setSelectedDayIdx(i)}
+                className={`flex flex-col items-center px-2 py-2 rounded-xl text-sm font-semibold transition flex-1
+                  ${i === selectedDayIdx ? 'bg-blue-600 text-white shadow-md' : d.isToday ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'text-slate-500 hover:bg-slate-50'}`}>
+                <span className="text-xs">{d.label}</span>
+                <span className="text-base font-bold">{d.date}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setWeekOffset(w => w + 1)}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition shrink-0">
+            ›
+          </button>
+        </div>
+        <div className="flex items-center justify-center gap-3 mt-3">
+          <p className="text-xs text-slate-400">
+            {selectedDay.fullDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {selectedDay.isToday && <span className="ml-2 text-blue-500 font-semibold">· Today</span>}
+          </p>
+          {!selectedDay.isToday && (
+            <button onClick={() => { setWeekOffset(0); setSelectedDayIdx(todayDayIdx) }}
+              className="text-xs font-semibold px-3 py-1 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition">
+              Today
+            </button>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Today's schedule */}
+        {/* Selected day's schedule */}
         <div className="md:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-          <h3 className="font-bold text-slate-800 mb-4">Today's Schedule</h3>
+          <h3 className="font-bold text-slate-800 mb-4">
+            {selectedDay.isToday ? "Today's Schedule" : `${selectedDay.fullDate.toLocaleDateString('en-IN', { weekday: 'long' })}'s Schedule`}
+          </h3>
           <div className="space-y-3">
-            {allTasks.map(task => {
-              const isDone = !!checked[task.id]
+            {allTasks.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-6">No tasks scheduled for this day.</p>
+            ) : allTasks.map(task => {
+              const isDone = selectedDay.isToday ? !!checked[task.id] : false
               return (
                 <div key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border transition
                   ${isDone ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
@@ -245,11 +288,13 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
                     <p className={`text-sm font-semibold ${isDone ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.label}</p>
                     {task.type === 'med' && <p className="text-xs text-slate-400 mt-0.5">Dosage · Before Meal · Status: <span className={isDone ? 'text-green-600' : 'text-amber-600'}>{isDone ? 'DONE' : 'PENDING'}</span></p>}
                   </div>
-                  <button onClick={() => onToggle(task.id)}
-                    className={`text-xs font-semibold px-3 py-1 rounded-lg border transition
-                      ${isDone ? 'bg-green-100 text-green-700 border-green-200' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}>
-                    {isDone ? 'Done ✓' : 'Mark Done'}
-                  </button>
+                  {selectedDay.isToday && (
+                    <button onClick={() => onToggle(task.id)}
+                      className={`text-xs font-semibold px-3 py-1 rounded-lg border transition
+                        ${isDone ? 'bg-green-100 text-green-700 border-green-200' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}>
+                      {isDone ? 'Done ✓' : 'Mark Done'}
+                    </button>
+                  )}
                 </div>
               )
             })}
