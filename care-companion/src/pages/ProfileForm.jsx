@@ -3,7 +3,7 @@ import { Plus, Trash2, ClipboardList } from 'lucide-react'
 
 const CONDITIONS = ['Diabetes', 'High BP', 'Arthritis', 'Heart Blockage', 'Hemorrhoids']
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const emptyMed = () => ({ name: '', days: [], times: [''] })
+const emptyMed = () => ({ name: '', days: [], times: [''], endDate: '' })
 
 export default function ProfileForm({ user, onSubmit }) {
   const [form, setForm] = useState(() => {
@@ -180,6 +180,21 @@ export default function ProfileForm({ user, onSubmit }) {
                         <Plus size={14} /> Add Time
                       </button>
                       {errors[`mt${i}`] && <p className="text-red-500 text-xs mt-1">{errors[`mt${i}`]}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Take Until (End Date) <span className="text-slate-400 font-normal">— optional</span></label>
+                      <input
+                        type="date"
+                        value={med.endDate || ''}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={e => updateMed(i, 'endDate', e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      />
+                      {med.endDate && (
+                        <p className="text-xs text-slate-400 mt-1">
+                          Until {new Date(med.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
