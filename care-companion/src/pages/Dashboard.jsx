@@ -81,7 +81,8 @@ function MiniCalendar({ streak }) {
 
 // ── Home Tab ──────────────────────────────────────────────────────────────────
 function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
-  const condTasks = CONDITION_TASKS[profile.condition] || []
+  const deletedRoutines = profile.deletedRoutines || []
+  const condTasks = (CONDITION_TASKS[profile.condition] || []).filter(t => !deletedRoutines.includes(t.id))
   const medTasks = profile.meds.map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...condTasks, ...medTasks]
   const done = Object.values(checked).filter(Boolean).length
@@ -191,22 +192,27 @@ function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
 }
 
 // ── Schedule Tab ──────────────────────────────────────────────────────────────
-function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds }) {
+function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdateRoutines }) {
   const [showManage, setShowManage] = useState(false)
   const today = new Date()
-  const todayIdx = today.getDay() // 0=Sun
+  const todayIdx = today.getDay()
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(today); d.setDate(today.getDate() - todayIdx + i)
     return { label: DAYS_SHORT[i], date: d.getDate(), isToday: i === todayIdx }
   })
 
-  const condTasks = CONDITION_TASKS[profile.condition] || []
+  const allCondTasks = CONDITION_TASKS[profile.condition] || []
+  const deletedRoutines = profile.deletedRoutines || []
+  const condTasks = allCondTasks.filter(t => !deletedRoutines.includes(t.id))
   const medTasks = profile.meds.map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...medTasks, ...condTasks]
 
   const handleDeleteMed = (index) => {
-    const updated = profile.meds.filter((_, i) => i !== index)
-    onUpdateMeds(updated)
+    onUpdateMeds(profile.meds.filter((_, i) => i !== index))
+  }
+
+  const handleDeleteRoutine = (taskId) => {
+    onUpdateRoutines([...deletedRoutines, taskId])
   }
 
   return (
@@ -314,21 +320,35 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds }) {
               </div>
 
               {/* Condition Routines */}
-              {condTasks.length > 0 && (
+              {allCondTasks.length > 0 && (
                 <div>
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Daily Routines — {profile.condition}</p>
                   <div className="space-y-2">
-                    {condTasks.map(task => (
-                      <div key={task.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
-                          <Activity className="text-green-600" size={14} />
+                    {allCondTasks.map(task => {
+                      const isDeleted = deletedRoutines.includes(task.id)
+                      return (
+                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-xl border ${isDeleted ? 'bg-red-50 border-red-100 opacity-60' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDeleted ? 'bg-red-100' : 'bg-green-100'}`}>
+                            <Activity className={isDeleted ? 'text-red-400' : 'text-green-600'} size={14} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold ${isDeleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.label}</p>
+                            <p className="text-xs text-slate-400">{isDeleted ? 'Removed' : 'Daily routine'}</p>
+                          </div>
+                          {isDeleted ? (
+                            <button onClick={() => onUpdateRoutines(deletedRoutines.filter(id => id !== task.id))}
+                              className="text-xs font-semibold px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50 transition">
+                              Restore
+                            </button>
+                          ) : (
+                            <button onClick={() => handleDeleteRoutine(task.id)}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800">{task.label}</p>
-                          <p className="text-xs text-slate-400">Daily routine</p>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -427,7 +447,8 @@ function HealthLogsTab() {
 // ── Insights Tab ─────────────────────────────────────────────────────────────
 function InsightsTab({ profile, checked }) {
   const [view, setView] = useState('weekly')
-  const condTasks = CONDITION_TASKS[profile.condition] || []
+  const deletedRoutines = profile.deletedRoutines || []
+  const condTasks = (CONDITION_TASKS[profile.condition] || []).filter(t => !deletedRoutines.includes(t.id))
   const medTasks = profile.meds.map(m => ({ id: `med_${m.name}` }))
   const allTasks = [...condTasks, ...medTasks]
   const done = Object.values(checked).filter(Boolean).length
@@ -615,6 +636,18 @@ export default function Dashboard({ profile, user, onLogout }) {
     setCurrentProfile(updatedProfile)
   }
 
+  const handleRoutinesUpdate = (deletedRoutines) => {
+    const updatedProfile = { ...currentProfile, deletedRoutines }
+    const users = loadFromLocalStorage('careCompanionUsers') || {}
+    const key = (user?.name || currentProfile.name).toLowerCase()
+    if (users[key]) {
+      users[key] = { ...users[key], profile: updatedProfile }
+      saveToLocalStorage('careCompanionUsers', users)
+    }
+    saveToLocalStorage('careCompanionSession', { loggedUser: user, profile: updatedProfile })
+    setCurrentProfile(updatedProfile)
+  }
+
   const condTasks = CONDITION_TASKS[currentProfile.condition] || []
   const medTasks = currentProfile.meds.map(m => ({ id: `med_${m.name}` }))
   const allTasks = [...condTasks, ...medTasks]
@@ -722,7 +755,7 @@ export default function Dashboard({ profile, user, onLogout }) {
               </div>
             </div>
           )}
-          {tab === 'schedule' && <ScheduleTab profile={currentProfile} checked={checked} onToggle={toggle} setTab={handleTabChange} onUpdateMeds={handleMedsUpdate} />}
+          {tab === 'schedule' && <ScheduleTab profile={currentProfile} checked={checked} onToggle={toggle} setTab={handleTabChange} onUpdateMeds={handleMedsUpdate} onUpdateRoutines={handleRoutinesUpdate} />}
           {tab === 'logs' && <HealthLogsTab />}
           {tab === 'insights' && <InsightsTab profile={currentProfile} checked={checked} />}
           {tab === 'profile' && <ProfileForm user={currentProfile} onSubmit={handleProfileUpdate} />}
