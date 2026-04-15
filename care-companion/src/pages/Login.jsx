@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { loadFromLocalStorage } from './storage'
 import { Heart, Eye, EyeOff, LogIn } from 'lucide-react'
+import { loadFromLocalStorage } from './storage'
 
 export default function Login({ onSubmit, onSignup }) {
   const [form, setForm] = useState({ name: '', password: '' })
@@ -14,13 +14,12 @@ export default function Login({ onSubmit, onSignup }) {
       return;
     }
 
-    const enteredName = form.name.trim();
-    const storageKey = enteredName.toLowerCase(); // Normalize entered name for lookup
     const users = loadFromLocalStorage('careCompanionUsers') || {};
-    const user = users[storageKey]; // Look up using normalized key
+    const storageKey = form.name.trim().toLowerCase();
+    const user = users[storageKey];
 
     if (user && user.password === form.password) {
-      onSubmit(user); // Pass the full user object including profile
+      onSubmit(user); // Pass the full user object
     } else {
       setError('Invalid name or password. Please try again.');
     }

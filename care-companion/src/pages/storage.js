@@ -18,11 +18,3 @@ export const loadFromLocalStorage = (key) => {
     return undefined;
   }
 };
-
-export const removeFromLocalStorage = (key) => {
-  try {
-    localStorage.removeItem(key);
-  } catch (error) {
-    console.error("Error removing from local storage", error);
-  }
-};

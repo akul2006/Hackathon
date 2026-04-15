@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { saveToLocalStorage, loadFromLocalStorage } from './storage'
 import { Heart, Eye, EyeOff, UserPlus } from 'lucide-react'
+import { saveToLocalStorage, loadFromLocalStorage } from './storage'
 
 const Field = ({ label, name, type = 'text', value, onChange, error, placeholder, rightEl }) => (
   <div>
@@ -39,22 +39,25 @@ export default function SignUp({ onSubmit, onLogin }) {
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
 
-    const displayName = form.name.trim();
-    const storageKey = displayName.toLowerCase();
-    // Save user to local storage
     const users = loadFromLocalStorage('careCompanionUsers') || {}
+    const displayName = form.name.trim()
+    const storageKey = displayName.toLowerCase()
+
     if (users[storageKey]) {
       setErrors({ name: 'Account with this name already exists.' })
       return
     }
+
     const newUser = {
       name: displayName,
       mobile: form.mobile,
-      password: form.password,
-      profile: { name: displayName, age: '', condition: '', meds: [] } // Initial empty profile
+      password: form.password, // In a real app, this would be hashed
+      profile: { name: displayName, age: '', condition: '', meds: [] }
     }
-    saveToLocalStorage('careCompanionUsers', { ...users, [storageKey]: newUser })
-    onSubmit(newUser) // Still call original onSubmit, passing the new user object
+
+    users[storageKey] = newUser
+    saveToLocalStorage('careCompanionUsers', users)
+    onSubmit(newUser)
   }
 
   return (

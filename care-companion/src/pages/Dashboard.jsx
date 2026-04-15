@@ -604,7 +604,7 @@ export default function Dashboard({ profile, user, onLogout }) {
   const [currentProfile, setCurrentProfile] = useState(profile)
 
   // Load initial state from localStorage
-  const username = (user?.name || currentProfile.name).toLowerCase(); // Use lowercase for consistent storage keys
+  const username = (user?.name || currentProfile.name).toLowerCase();
   const todayDate = getTodayDateString();
 
   const [checked, setChecked] = useState(() => {
