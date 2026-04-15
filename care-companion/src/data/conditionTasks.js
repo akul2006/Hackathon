@@ -40,7 +40,7 @@ export function getMissedMeds(meds) {
   const now = new Date()
   const todayDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()]
   return meds.filter(med => {
-    if (!med.days.includes(todayDay)) return false
+    if (!med.time || !med.days.includes(todayDay)) return false
     const [h, m] = med.time.split(':').map(Number)
     const medTime = new Date(); medTime.setHours(h, m, 0, 0)
     return (now - medTime) / 3600000 > 2
@@ -51,7 +51,7 @@ export function getUpcomingMed(meds) {
   const now = new Date()
   const todayDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()]
   const upcoming = meds
-    .filter(med => med.days.includes(todayDay))
+    .filter(med => med.time && med.days.includes(todayDay))
     .map(med => {
       const [h, m] = med.time.split(':').map(Number)
       const t = new Date(); t.setHours(h, m, 0, 0)
