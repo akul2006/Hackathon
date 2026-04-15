@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { loadFromLocalStorage } from './storage'
 import { Heart, Eye, EyeOff, LogIn } from 'lucide-react'
 
 export default function Login({ onSubmit, onSignup }) {
@@ -7,22 +6,29 @@ export default function Login({ onSubmit, onSignup }) {
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name.trim() || !form.password) {
       setError('Please enter your name and password.');
       return;
     }
 
-    const enteredName = form.name.trim();
-    const storageKey = enteredName.toLowerCase(); // Normalize entered name for lookup
-    const users = loadFromLocalStorage('careCompanionUsers') || {};
-    const user = users[storageKey]; // Look up using normalized key
+    try {
+      const response = await fetch('http://localhost:3001/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name.trim(), password: form.password }),
+      });
 
-    if (user && user.password === form.password) {
-      onSubmit(user); // Pass the full user object including profile
-    } else {
-      setError('Invalid name or password. Please try again.');
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || 'Invalid name or password.');
+      } else {
+        onSubmit(data); // Pass the full user object from the backend
+      }
+    } catch (error) {
+      console.error('Login network error:', error);
+      setError('Could not connect to the server.');
     }
   }
 
