@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Heart, Bell, Home, Calendar, BarChart2, Activity, User, LogOut,
   CheckCircle2, Circle, AlertTriangle, Trophy, X, Clock, Pill,
-  TrendingUp, Droplets, Wind, Footprints, Clipboard, ThermometerSun, ShieldCheck } from 'lucide-react'
+  TrendingUp, Droplets, Wind, Footprints, Clipboard, ThermometerSun, ShieldCheck, Trash2, Plus } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ProfileForm from './ProfileForm'
 import { CONDITION_TASKS, getMissedMeds, getUpcomingMed } from '../data/conditionTasks'
@@ -191,7 +191,8 @@ function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
 }
 
 // ── Schedule Tab ──────────────────────────────────────────────────────────────
-function ScheduleTab({ profile, checked, onToggle, setTab }) {
+function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds }) {
+  const [showManage, setShowManage] = useState(false)
   const today = new Date()
   const todayIdx = today.getDay() // 0=Sun
   const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -202,6 +203,11 @@ function ScheduleTab({ profile, checked, onToggle, setTab }) {
   const condTasks = CONDITION_TASKS[profile.condition] || []
   const medTasks = profile.meds.map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...medTasks, ...condTasks]
+
+  const handleDeleteMed = (index) => {
+    const updated = profile.meds.filter((_, i) => i !== index)
+    onUpdateMeds(updated)
+  }
 
   return (
     <div className="space-y-5">
@@ -260,11 +266,87 @@ function ScheduleTab({ profile, checked, onToggle, setTab }) {
               </div>
             ))}
           </div>
-          <button onClick={() => setTab('profile')} className="mt-4 w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition">
+          <button onClick={() => setShowManage(true)} className="mt-4 w-full py-2.5 bg-slate-100 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-200 transition">
+            Manage Schedules
+          </button>
+          <button onClick={() => setTab('profile')} className="mt-2 w-full py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition">
             + Add Medication / Routine
           </button>
         </div>
       </div>
+
+      {/* Manage Schedules Modal */}
+      {showManage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-bold text-slate-900">Manage Schedules</h2>
+              <button onClick={() => setShowManage(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
+              {/* Medications */}
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Medications</p>
+                {profile.meds.length === 0 ? (
+                  <p className="text-slate-400 text-sm py-2">No medications added yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {profile.meds.map((m, i) => (
+                      <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                          <Pill className="text-blue-600" size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
+                          <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}</p>
+                        </div>
+                        <button onClick={() => handleDeleteMed(i)}
+                          className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Condition Routines */}
+              {condTasks.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Daily Routines — {profile.condition}</p>
+                  <div className="space-y-2">
+                    {condTasks.map(task => (
+                      <div key={task.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
+                          <Activity className="text-green-600" size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">{task.label}</p>
+                          <p className="text-xs text-slate-400">Daily routine</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => { setShowManage(false); setTab('profile') }}
+                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                <Plus size={16} /> Add New Schedule
+              </button>
+              <button onClick={() => setShowManage(false)}
+                className="px-4 py-2.5 bg-slate-100 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-200 transition">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -444,7 +526,15 @@ const getTodayDateString = () => new Date().toISOString().slice(0, 10);
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard({ profile, user, onLogout }) {
-  const [tab, setTab] = useState('home')
+  const [tab, setTab] = useState(() => {
+    const saved = loadFromLocalStorage(`careCompanionTab_${(user?.name || '').toLowerCase()}`)
+    return saved || 'home'
+  })
+
+  const handleTabChange = (newTab) => {
+    setTab(newTab)
+    saveToLocalStorage(`careCompanionTab_${(user?.name || '').toLowerCase()}`, newTab)
+  }
   const [currentProfile, setCurrentProfile] = useState(profile)
 
   // Load initial state from localStorage
@@ -488,29 +578,41 @@ export default function Dashboard({ profile, user, onLogout }) {
     const newDisplayName = updatedData.name.trim();
     const newUsernameKey = newDisplayName.toLowerCase();
 
-    const currentUserData = users[oldUsernameKey];
+    const currentUserData = users[oldUsernameKey] || { name: newDisplayName, password: user?.password || '' };
 
-    if (currentUserData) {
-      const updatedUserData = {
-        ...currentUserData,
-        name: newDisplayName,
-        profile: updatedData,
-      };
+    const updatedUserData = {
+      ...currentUserData,
+      name: newDisplayName,
+      profile: updatedData,
+    };
 
-      if (oldUsernameKey !== newUsernameKey) {
-        if (users[newUsernameKey]) {
-          console.error('A user with this name already exists.');
-          return;
-        }
+    if (oldUsernameKey !== newUsernameKey) {
+      if (users[newUsernameKey] && oldUsernameKey !== newUsernameKey) {
+        // name conflict — still update profile without renaming
+        users[oldUsernameKey] = { ...currentUserData, profile: updatedData };
+      } else {
         delete users[oldUsernameKey];
         users[newUsernameKey] = updatedUserData;
-      } else {
-        users[oldUsernameKey] = updatedUserData;
       }
-      saveToLocalStorage('careCompanionUsers', users);
+    } else {
+      users[oldUsernameKey] = updatedUserData;
     }
+    saveToLocalStorage('careCompanionUsers', users);
+    saveToLocalStorage('careCompanionSession', { loggedUser: user, profile: updatedData });
     setCurrentProfile(updatedData);
-    setTab('home');
+    handleTabChange('home');
+  }
+
+  const handleMedsUpdate = (updatedMeds) => {
+    const updatedProfile = { ...currentProfile, meds: updatedMeds }
+    const users = loadFromLocalStorage('careCompanionUsers') || {}
+    const key = (user?.name || currentProfile.name).toLowerCase()
+    if (users[key]) {
+      users[key] = { ...users[key], profile: updatedProfile }
+      saveToLocalStorage('careCompanionUsers', users)
+    }
+    saveToLocalStorage('careCompanionSession', { loggedUser: user, profile: updatedProfile })
+    setCurrentProfile(updatedProfile)
   }
 
   const condTasks = CONDITION_TASKS[currentProfile.condition] || []
@@ -539,7 +641,7 @@ export default function Dashboard({ profile, user, onLogout }) {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar */}
-      <aside className="hidden md:flex flex-col w-56 bg-white border-r border-slate-100 shadow-sm p-4 shrink-0">
+      <aside className="hidden md:flex flex-col w-56 bg-white border-r border-slate-100 shadow-sm p-4 shrink-0 sticky top-0 h-screen">
         <div className="flex items-center gap-2 mb-8 px-2">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <Heart className="text-white" size={16} />
@@ -547,7 +649,7 @@ export default function Dashboard({ profile, user, onLogout }) {
           <span className="font-bold text-slate-900 text-sm">Care<span className="text-blue-600">Companion</span></span>
         </div>
         <nav className="space-y-1 flex-1">
-          {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={tab === n.id} onClick={() => setTab(n.id)} />)}
+          {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={tab === n.id} onClick={() => handleTabChange(n.id)} />)}
         </nav>
         <button onClick={onLogout} className="flex items-center gap-2 text-slate-400 hover:text-red-500 transition text-sm font-medium px-4 py-2 mt-4">
           <LogOut size={16} /> Logout
@@ -579,7 +681,7 @@ export default function Dashboard({ profile, user, onLogout }) {
         {/* Mobile nav */}
         <div className="md:hidden flex gap-1 bg-white border-b border-slate-100 px-3 py-2 overflow-x-auto">
           {navItems.map(n => (
-            <button key={n.id} onClick={() => setTab(n.id)}
+            <button key={n.id} onClick={() => handleTabChange(n.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition
                 ${tab === n.id ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
               <n.icon size={14} /> {n.label}
@@ -620,7 +722,7 @@ export default function Dashboard({ profile, user, onLogout }) {
               </div>
             </div>
           )}
-          {tab === 'schedule' && <ScheduleTab profile={currentProfile} checked={checked} onToggle={toggle} setTab={setTab} />}
+          {tab === 'schedule' && <ScheduleTab profile={currentProfile} checked={checked} onToggle={toggle} setTab={handleTabChange} onUpdateMeds={handleMedsUpdate} />}
           {tab === 'logs' && <HealthLogsTab />}
           {tab === 'insights' && <InsightsTab profile={currentProfile} checked={checked} />}
           {tab === 'profile' && <ProfileForm user={currentProfile} onSubmit={handleProfileUpdate} />}
