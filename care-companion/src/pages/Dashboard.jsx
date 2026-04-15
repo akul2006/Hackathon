@@ -41,7 +41,13 @@ function computeStreak(username) {
   return streak
 }
 
-// ── sub-components ────────────────────────────────────────────────────────────
+// Returns true if a med is active on the given date string (YYYY-MM-DD)
+function isMedActive(med, dateStr) {
+  if (!med.endDate) return true
+  return dateStr <= med.endDate
+}
+
+
 function NavItem({ icon: Icon, label, active, onClick }) {
   return (
     <button onClick={onClick}
@@ -109,9 +115,12 @@ function MiniCalendar({ username }) {
 
 // ── Home Tab ──────────────────────────────────────────────────────────────────
 function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
+  const today = new Date().toISOString().slice(0, 10)
   const deletedRoutines = profile.deletedRoutines || []
   const condTasks = (CONDITION_TASKS[profile.condition] || []).filter(t => !deletedRoutines.includes(t.id))
-  const medTasks = profile.meds.map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
+  const medTasks = profile.meds
+    .filter(m => isMedActive(m, today))
+    .map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...condTasks, ...medTasks]
   const done = Object.values(checked).filter(Boolean).length
   const total = allTasks.length
@@ -228,7 +237,7 @@ function ManageModal({ profile, allCondTasks, deletedRoutines, onUpdateMeds, onU
   const startEdit = (i) => {
     const m = profile.meds[i]
     const times = m.times?.length ? m.times : (m.time ? [m.time] : [''])
-    setEditForm({ name: m.name, times, days: [...m.days] })
+    setEditForm({ name: m.name, times, days: [...m.days], endDate: m.endDate || '' })
     setEditIdx(i)
   }
 
@@ -236,7 +245,7 @@ function ManageModal({ profile, allCondTasks, deletedRoutines, onUpdateMeds, onU
     const validTimes = editForm.times.filter(t => t)
     if (!editForm.name.trim() || validTimes.length === 0 || editForm.days.length === 0) return
     const updated = profile.meds.map((m, i) =>
-      i === editIdx ? { ...m, name: editForm.name.trim(), time: validTimes[0], times: validTimes, days: editForm.days } : m
+      i === editIdx ? { ...m, name: editForm.name.trim(), time: validTimes[0], times: validTimes, days: editForm.days, endDate: editForm.endDate || '' } : m
     )
     onUpdateMeds(updated)
     setEditIdx(null)
@@ -316,6 +325,16 @@ function ManageModal({ profile, allCondTasks, deletedRoutines, onUpdateMeds, onU
                             ))}
                           </div>
                         </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">Take Until <span className="text-slate-400 font-normal">— optional</span></label>
+                          <input type="date" value={editForm.endDate || ''}
+                            min={new Date().toISOString().slice(0, 10)}
+                            onChange={e => setEditForm(f => ({ ...f, endDate: e.target.value }))}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                          {editForm.endDate && (
+                            <p className="text-xs text-slate-400 mt-1">Until {new Date(editForm.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                          )}
+                        </div>
                         <div className="flex gap-2 pt-1">
                           <button onClick={saveEdit}
                             className="flex-1 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">
@@ -334,7 +353,7 @@ function ManageModal({ profile, allCondTasks, deletedRoutines, onUpdateMeds, onU
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
-                          <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}</p>
+                          <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}{m.endDate ? ` · Until ${new Date(m.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}</p>
                         </div>
                         <button onClick={() => startEdit(i)}
                           className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition" aria-label="Edit">
@@ -428,9 +447,10 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
   const deletedRoutines = profile.deletedRoutines || []
   const condTasks = allCondTasks.filter(t => !deletedRoutines.includes(t.id))
 
-  // Filter meds that are scheduled for the selected day; show all meds on today
+  // Filter meds that are scheduled for the selected day; show all meds on today; respect endDate
+  const selectedDateStr = selectedDay.fullDate.toISOString().slice(0, 10)
   const medTasks = profile.meds
-    .filter(m => selectedDay.isToday || m.days.includes(selectedDayName))
+    .filter(m => isMedActive(m, selectedDateStr) && (selectedDay.isToday || m.days.includes(selectedDayName)))
     .map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...medTasks, ...condTasks]
 
@@ -523,7 +543,7 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
-                  <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}</p>
+                  <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}{m.endDate ? ` · Until ${new Date(m.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}</p>
                 </div>
               </div>
             ))}
@@ -555,10 +575,20 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
 
 // ── Health Logs Tab ───────────────────────────────────────────────────────────
 function HealthLogsTab({ username, todayDate }) {
+  const [view, setView] = useState('today')
   const [vitals, setVitals] = useState({ sugar: '', heartRate: '', weight: '' })
   const [mood, setMood] = useState('')
   const [notes, setNotes] = useState('')
   const [saved, setSaved] = useState(false)
+
+  const logsKey = `careCompanionVitalLogs_${username}`
+
+  const scanPastLogs = () => {
+    const all = loadFromLocalStorage(logsKey) || []
+    return [...all].reverse() // newest first
+  }
+
+  const [pastLogs, setPastLogs] = useState(scanPastLogs)
 
   const moods = [
     { label: 'Happy', emoji: '😊' }, { label: 'Tired', emoji: '😴' },
@@ -566,73 +596,157 @@ function HealthLogsTab({ username, todayDate }) {
   ]
 
   const handleSave = () => {
-    const existing = loadFromLocalStorage(`careCompanionHistory_${username}_${todayDate}`) || {}
-    saveToLocalStorage(`careCompanionHistory_${username}_${todayDate}`, {
-      ...existing,
-      vitalsLogged: true,
+    const hasData = vitals.sugar || vitals.heartRate || vitals.weight || mood || notes.trim()
+    if (!hasData) return
+    const entry = {
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
       vitals,
       mood,
       notes,
-    })
+    }
+    // Also mark vitalsLogged on the daily history for badge tracking
+    const existing = loadFromLocalStorage(`careCompanionHistory_${username}_${todayDate}`) || {}
+    saveToLocalStorage(`careCompanionHistory_${username}_${todayDate}`, { ...existing, vitalsLogged: true })
+    // Append to the logs array
+    const all = loadFromLocalStorage(logsKey) || []
+    saveToLocalStorage(logsKey, [...all, entry])
+    setPastLogs(scanPastLogs())
+    // Clear fields
+    setVitals({ sugar: '', heartRate: '', weight: '' })
+    setMood('')
+    setNotes('')
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-      {/* Vital Tracking */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-        <h3 className="font-bold text-slate-800 mb-5">Vital Tracking</h3>
-        <div className="space-y-4">
-          {[
-            { label: 'Blood Sugar', key: 'sugar', unit: 'mg/dL', icon: Droplets },
-            { label: 'Heart Rate', key: 'heartRate', unit: 'bpm', icon: Activity },
-            { label: 'Weight', key: 'weight', unit: 'kg', icon: TrendingUp },
-          ].map(({ label, key, unit, icon: Icon }) => (
-            <div key={key}>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</label>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <input type="number" value={vitals[key]}
-                    onChange={e => setVitals({ ...vitals, [key]: e.target.value })}
-                    placeholder="—"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <span className="text-xs text-slate-400 font-medium w-12">{unit}</span>
-                <Icon size={16} className="text-blue-400" />
-              </div>
-            </div>
-          ))}
-        </div>
-        <button onClick={handleSave}
-          className={`mt-5 w-full py-3 font-bold rounded-xl transition text-sm ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-          {saved ? '✓ Vitals Logged!' : 'Log Vitals'}
-        </button>
+    <div className="space-y-5">
+      {/* Tab toggle */}
+      <div className="flex gap-2">
+        {[['today', 'Log Today'], ['history', 'Past Logs']].map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)}
+            className={`px-5 py-2 rounded-xl text-sm font-bold transition border
+              ${view === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+            {label}
+            {v === 'history' && pastLogs.length > 0 && (
+              <span className="ml-2 bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{pastLogs.length}</span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Symptom + Notes */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-        <h3 className="font-bold text-slate-800 mb-5">Symptom Checker</h3>
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          {moods.map(m => (
-            <button key={m.label} onClick={() => setMood(m.label)}
-              className={`flex flex-col items-center gap-1 p-3 rounded-xl border text-xs font-semibold transition
-                ${mood === m.label ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-blue-200'}`}>
-              <span className="text-2xl">{m.emoji}</span>
-              {m.label}
+      {view === 'today' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Vital Tracking */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+            <h3 className="font-bold text-slate-800 mb-5">Vital Tracking</h3>
+            <div className="space-y-4">
+              {[
+                { label: 'Blood Sugar', key: 'sugar', unit: 'mg/dL', icon: Droplets },
+                { label: 'Heart Rate', key: 'heartRate', unit: 'bpm', icon: Activity },
+                { label: 'Weight', key: 'weight', unit: 'kg', icon: TrendingUp },
+              ].map(({ label, key, unit, icon: Icon }) => (
+                <div key={key}>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">{label}</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={vitals[key]}
+                      onChange={e => setVitals({ ...vitals, [key]: e.target.value })}
+                      placeholder="—"
+                      className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <span className="text-xs text-slate-400 font-medium w-12">{unit}</span>
+                    <Icon size={16} className="text-blue-400" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleSave}
+              className={`mt-5 w-full py-3 font-bold rounded-xl transition text-sm ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+              {saved ? '✓ Vitals Logged!' : 'Log Vitals'}
             </button>
-          ))}
+          </div>
+
+          {/* Symptom + Notes */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+            <h3 className="font-bold text-slate-800 mb-5">Symptom Checker</h3>
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              {moods.map(m => (
+                <button key={m.label} onClick={() => setMood(m.label)}
+                  className={`flex flex-col items-center gap-1 p-3 rounded-xl border text-xs font-semibold transition
+                    ${mood === m.label ? 'bg-blue-50 border-blue-400 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-blue-200'}`}>
+                  <span className="text-2xl">{m.emoji}</span>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <h3 className="font-bold text-slate-800 mb-3">Daily Notes / Observations</h3>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Jot down how you feel today, things to tell the doctor..."
+              rows={5}
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            <button onClick={handleSave}
+              className={`mt-3 w-full py-3 font-bold rounded-xl transition text-sm ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+              {saved ? '✓ Saved!' : 'Save Daily Log'}
+            </button>
+          </div>
         </div>
-        <h3 className="font-bold text-slate-800 mb-3">Daily Notes / Observations</h3>
-        <textarea value={notes} onChange={e => setNotes(e.target.value)}
-          placeholder="Jot down how you feel today, things to tell the doctor..."
-          rows={5}
-          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
-        <button onClick={handleSave}
-          className={`mt-3 w-full py-3 font-bold rounded-xl transition text-sm ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-          {saved ? '✓ Saved!' : 'Save Daily Log'}
-        </button>
-      </div>
+      )}
+
+      {view === 'history' && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+          <h3 className="font-bold text-slate-800 mb-5">Past Vital Logs</h3>
+          {pastLogs.length === 0 ? (
+            <div className="text-center py-12 text-slate-400">
+              <Activity size={32} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">No past logs found. Start logging your vitals today.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pastLogs.map(log => {
+                const logDate = new Date(log.timestamp)
+                return (
+                  <div key={log.id} className="border border-slate-100 rounded-xl p-4 hover:border-blue-100 transition">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">
+                          {logDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {logDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                          {log.mood && <span> · {moods.find(m => m.label === log.mood)?.emoji} {log.mood}</span>}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold px-2.5 py-1 bg-green-50 text-green-700 border border-green-100 rounded-full">
+                        Saved
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: 'Blood Sugar', key: 'sugar', unit: 'mg/dL', icon: Droplets, color: 'text-red-500' },
+                        { label: 'Heart Rate', key: 'heartRate', unit: 'bpm', icon: Activity, color: 'text-pink-500' },
+                        { label: 'Weight', key: 'weight', unit: 'kg', icon: TrendingUp, color: 'text-blue-500' },
+                      ].map(({ label, key, unit, icon: Icon, color }) => (
+                        <div key={key} className="bg-slate-50 rounded-lg p-3 text-center">
+                          <Icon size={14} className={`mx-auto mb-1 ${color}`} />
+                          <p className="text-base font-black text-slate-800">
+                            {log.vitals?.[key] ? log.vitals[key] : <span className="text-slate-300 font-normal">—</span>}
+                          </p>
+                          <p className="text-xs text-slate-400">{unit}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {log.notes && (
+                      <p className="mt-3 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2 italic">
+                        "{log.notes}"
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -872,8 +986,44 @@ export default function Dashboard({ profile, user, onLogout }) {
   const [streak, setStreak] = useState(() => computeStreak((user?.name || '').toLowerCase()))
   const [showPopup, setShowPopup] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [medAlert, setMedAlert] = useState(null) // { med, taskId }
-  const snoozeUntilRef = useRef({}) // { taskId: timestamp }
+  const [notifications, setNotifications] = useState(() =>
+    loadFromLocalStorage(`careCompanionNotifs_${(user?.name || '').toLowerCase()}`) || []
+  )
+  const [medAlert, setMedAlert] = useState(null)
+  const snoozeUntilRef = useRef({})
+
+  const addNotification = (notif) => {
+    setNotifications(prev => {
+      // avoid duplicate unread notifs with same id
+      if (prev.find(n => n.id === notif.id && !n.read)) return prev
+      const updated = [{ ...notif, read: false, ts: Date.now() }, ...prev].slice(0, 50)
+      saveToLocalStorage(`careCompanionNotifs_${username}`, updated)
+      return updated
+    })
+  }
+
+  const markRead = (id) => {
+    setNotifications(prev => {
+      const updated = prev.map(n => n.id === id ? { ...n, read: true } : n)
+      saveToLocalStorage(`careCompanionNotifs_${username}`, updated)
+      return updated
+    })
+  }
+
+  const markAllRead = () => {
+    setNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, read: true }))
+      saveToLocalStorage(`careCompanionNotifs_${username}`, updated)
+      return updated
+    })
+  }
+
+  const clearNotifications = () => {
+    saveToLocalStorage(`careCompanionNotifs_${username}`, [])
+    setNotifications([])
+  }
+
+  const unreadCount = notifications.filter(n => !n.read).length
   const [popupShownToday, setPopupShownToday] = useState(() => {
     const savedPopupShown = loadFromLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`);
     return savedPopupShown || false;
@@ -911,6 +1061,29 @@ export default function Dashboard({ profile, user, onLogout }) {
     saveToLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`, popupShownToday);
   }, [popupShownToday, username, todayDate]);
 
+  // Push notifications for missed meds and upcoming dose
+  useEffect(() => {
+    missedMeds.forEach(m => {
+      addNotification({
+        id: `missed_${m.name}_${todayDate}`,
+        type: 'missed',
+        title: 'Missed Dose',
+        body: `${m.name} was due at ${fmtTime(m.time)}`,
+      })
+    })
+  }, [missedMeds.length])
+
+  useEffect(() => {
+    if (upcoming) {
+      addNotification({
+        id: `upcoming_${upcoming.name}_${upcoming.time}_${todayDate}`,
+        type: 'upcoming',
+        title: 'Upcoming Dose',
+        body: `${upcoming.name} in ${upcoming.diffMin} mins at ${fmtTime(upcoming.time)}`,
+      })
+    }
+  }, [upcoming?.name, upcoming?.diffMin])
+
   // Med alert interval — checks every 30s if a med is due and not yet done/snoozed
   useEffect(() => {
     const check = () => {
@@ -919,6 +1092,7 @@ export default function Dashboard({ profile, user, onLogout }) {
       const todayDay = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getDay()]
       for (const med of currentProfile.meds) {
         if (!med.time || !med.days.includes(todayDay)) continue
+        if (!isMedActive(med, todayDate)) continue
         const taskId = `med_${med.name}`
         if (checked[taskId]) continue // already done
         const [h, m] = med.time.split(':').map(Number)
@@ -929,6 +1103,12 @@ export default function Dashboard({ profile, user, onLogout }) {
         if (Date.now() < snoozeUntil) continue // snoozed
         // Due and not snoozed — show alert
         setMedAlert({ med, taskId })
+        addNotification({
+          id: `alert_${med.name}_${med.time}_${todayDate}`,
+          type: 'alert',
+          title: 'Medication Due',
+          body: `Time to take ${med.name} (${fmtTime(med.time)})`,
+        })
         return
       }
     }
@@ -1005,7 +1185,7 @@ export default function Dashboard({ profile, user, onLogout }) {
   }
 
   const condTasks = CONDITION_TASKS[currentProfile.condition] || []
-  const medTasks = currentProfile.meds.map(m => ({ id: `med_${m.name}` }))
+  const medTasks = currentProfile.meds.filter(m => isMedActive(m, todayDate)).map(m => ({ id: `med_${m.name}` }))
   const allTasks = [...condTasks, ...medTasks]
   const done = Object.values(checked).filter(Boolean).length
   const allDone = done === allTasks.length && allTasks.length > 0
@@ -1014,8 +1194,9 @@ export default function Dashboard({ profile, user, onLogout }) {
     if (allDone && !popupShownToday) { setShowPopup(true); setPopupShownToday(true); }
   }, [allDone, popupShownToday]);
 
-  const missedMeds = getMissedMeds(currentProfile.meds)
-  const upcoming = getUpcomingMed(currentProfile.meds)
+  const activeMeds = currentProfile.meds.filter(m => isMedActive(m, todayDate))
+  const missedMeds = getMissedMeds(activeMeds)
+  const upcoming = getUpcomingMed(activeMeds)
 
   const toggle = (id) => setChecked(prev => ({ ...prev, [id]: !prev[id] }))
 
@@ -1058,42 +1239,71 @@ export default function Dashboard({ profile, user, onLogout }) {
               <button onClick={() => setShowNotifications(n => !n)}
                 className="relative p-2 rounded-xl hover:bg-slate-100 transition" aria-label="Notifications">
                 <Bell size={20} className="text-slate-500" />
-                {(missedMeds.length > 0 || upcoming) && <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />}
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </button>
               {showNotifications && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden">
+                <div className="absolute right-0 top-full mt-2 w-84 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden" style={{width:'340px'}}>
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                    <p className="text-sm font-bold text-slate-800">Notifications</p>
-                    <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600">
-                      <X size={16} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-slate-800">Notifications</p>
+                      {unreadCount > 0 && (
+                        <span className="text-xs font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">{unreadCount} new</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {notifications.length > 0 && (
+                        <>
+                          {unreadCount > 0 && (
+                            <button onClick={markAllRead} className="text-xs text-blue-600 font-semibold hover:text-blue-800 transition">
+                              Mark all read
+                            </button>
+                          )}
+                          <button onClick={clearNotifications} className="text-xs text-slate-400 font-semibold hover:text-red-500 transition">
+                            Clear
+                          </button>
+                        </>
+                      )}
+                      <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600 ml-1">
+                        <X size={16} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="max-h-72 overflow-y-auto">
-                    {missedMeds.length === 0 && !upcoming ? (
-                      <div className="px-4 py-6 text-center text-slate-400 text-sm">
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="px-4 py-8 text-center text-slate-400 text-sm">
                         <Bell size={24} className="mx-auto mb-2 opacity-30" />
-                        No notifications right now
+                        No notifications
                       </div>
                     ) : (
                       <div className="divide-y divide-slate-50">
-                        {missedMeds.map(m => (
-                          <div key={m.name} className="flex items-start gap-3 px-4 py-3 bg-red-50">
-                            <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
-                            <div>
-                              <p className="text-sm font-semibold text-red-700">Missed Dose</p>
-                              <p className="text-xs text-red-500">{m.name} was due at {fmtTime(m.time)}</p>
+                        {notifications.map(n => (
+                          <div key={n.id}
+                            className={`flex items-start gap-3 px-4 py-3 transition cursor-pointer hover:bg-slate-50
+                              ${n.read ? 'opacity-60' : n.type === 'missed' ? 'bg-red-50' : n.type === 'alert' ? 'bg-orange-50' : 'bg-blue-50'}`}
+                            onClick={() => markRead(n.id)}>
+                            <div className="shrink-0 mt-0.5">
+                              {n.type === 'missed' && <AlertTriangle className="text-red-500" size={16} />}
+                              {n.type === 'upcoming' && <Clock className="text-blue-500" size={16} />}
+                              {n.type === 'alert' && <Bell className="text-orange-500" size={16} />}
                             </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-semibold ${n.type === 'missed' ? 'text-red-700' : n.type === 'alert' ? 'text-orange-700' : 'text-blue-700'}`}>
+                                {n.title}
+                              </p>
+                              <p className={`text-xs mt-0.5 ${n.type === 'missed' ? 'text-red-500' : n.type === 'alert' ? 'text-orange-500' : 'text-blue-500'}`}>
+                                {n.body}
+                              </p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {new Date(n.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                            {!n.read && <span className="w-2 h-2 bg-blue-500 rounded-full shrink-0 mt-1.5" />}
                           </div>
                         ))}
-                        {upcoming && (
-                          <div className="flex items-start gap-3 px-4 py-3 bg-blue-50">
-                            <Clock className="text-blue-500 shrink-0 mt-0.5" size={16} />
-                            <div>
-                              <p className="text-sm font-semibold text-blue-700">Upcoming Dose</p>
-                              <p className="text-xs text-blue-500">{upcoming.name} in {upcoming.diffMin} mins at {fmtTime(upcoming.time)}</p>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
