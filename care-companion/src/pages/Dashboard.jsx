@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Heart, Bell, Home, Calendar, BarChart2, Activity, User, LogOut,
   CheckCircle2, Circle, AlertTriangle, Trophy, X, Clock, Pill,
   TrendingUp, Droplets, Wind, Footprints, Clipboard, ThermometerSun, ShieldCheck, Trash2, Plus } from 'lucide-react'
@@ -20,6 +20,25 @@ function fmtTime(t) {
 function progressRingPath(pct, r = 54) {
   const circ = 2 * Math.PI * r
   return { circ, dash: (pct / 100) * circ }
+}
+
+// Compute streak by walking backwards through history
+function computeStreak(username) {
+  let streak = 0
+  const today = new Date()
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    const dateStr = d.toISOString().slice(0, 10)
+    const h = (() => { try { const v = localStorage.getItem(`careCompanionHistory_${username}_${dateStr}`); return v ? JSON.parse(v) : null } catch { return null } })()
+    if (h && h.pct > 0) {
+      streak++
+    } else if (i > 0) {
+      // gap found — stop (allow today to be in-progress)
+      break
+    }
+  }
+  return streak
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
@@ -51,13 +70,22 @@ function ProgressRing({ pct }) {
   )
 }
 
-function MiniCalendar({ streak }) {
+function MiniCalendar({ username }) {
   const today = new Date()
   const year = today.getFullYear(), month = today.getMonth()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const firstDay = new Date(year, month, 1).getDay()
   const todayDate = today.getDate()
-  const streakDays = Array.from({ length: streak }, (_, i) => todayDate - i).filter(d => d > 0)
+  // Build set of completed day-of-month numbers from history
+  const completedDays = new Set()
+  for (let d = 1; d <= todayDate; d++) {
+    const date = new Date(year, month, d)
+    const dateStr = date.toISOString().slice(0, 10)
+    try {
+      const h = JSON.parse(localStorage.getItem(`careCompanionHistory_${username}_${dateStr}`))
+      if (h && h.pct > 0) completedDays.add(d)
+    } catch {}
+  }
   const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
   const monthName = today.toLocaleString('default', { month: 'long', year: 'numeric' })
   return (
@@ -70,8 +98,8 @@ function MiniCalendar({ streak }) {
         {cells.map((d, i) => (
           <div key={i} className={`w-6 h-6 mx-auto flex items-center justify-center rounded-full font-medium
             ${d === todayDate ? 'bg-blue-600 text-white text-xs' : ''}
-            ${d && d !== todayDate && streakDays.includes(d) ? 'bg-green-100 text-green-700' : ''}
-            ${d && d !== todayDate && !streakDays.includes(d) ? 'text-slate-500' : ''}
+            ${d && d !== todayDate && completedDays.has(d) ? 'bg-green-100 text-green-700' : ''}
+            ${d && d !== todayDate && !completedDays.has(d) ? 'text-slate-500' : ''}
           `}>{d || ''}</div>
         ))}
       </div>
@@ -191,6 +219,189 @@ function HomeTab({ profile, checked, onToggle, streak, missedMeds, upcoming }) {
   )
 }
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function ManageModal({ profile, allCondTasks, deletedRoutines, onUpdateMeds, onUpdateRoutines, onClose, onAddNew }) {
+  const [editIdx, setEditIdx] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+
+  const startEdit = (i) => {
+    const m = profile.meds[i]
+    const times = m.times?.length ? m.times : (m.time ? [m.time] : [''])
+    setEditForm({ name: m.name, times, days: [...m.days] })
+    setEditIdx(i)
+  }
+
+  const saveEdit = () => {
+    const validTimes = editForm.times.filter(t => t)
+    if (!editForm.name.trim() || validTimes.length === 0 || editForm.days.length === 0) return
+    const updated = profile.meds.map((m, i) =>
+      i === editIdx ? { ...m, name: editForm.name.trim(), time: validTimes[0], times: validTimes, days: editForm.days } : m
+    )
+    onUpdateMeds(updated)
+    setEditIdx(null)
+    setEditForm(null)
+  }
+
+  const toggleDay = (day) => {
+    setEditForm(f => ({
+      ...f,
+      days: f.days.includes(day) ? f.days.filter(d => d !== day) : [...f.days, day]
+    }))
+  }
+
+  const updateTime = (ti, val) => setEditForm(f => { const t = [...f.times]; t[ti] = val; return { ...f, times: t } })
+  const addTime = () => setEditForm(f => ({ ...f, times: [...f.times, ''] }))
+  const removeTime = (ti) => setEditForm(f => ({ ...f, times: f.times.filter((_, i) => i !== ti) }))
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold text-slate-900">Manage Schedules</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+          {/* Medications */}
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Medications</p>
+            {profile.meds.length === 0 ? (
+              <p className="text-slate-400 text-sm py-2">No medications added yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {profile.meds.map((m, i) => (
+                  <div key={i}>
+                    {editIdx === i ? (
+                      <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">Medicine Name</label>
+                          <input type="text" value={editForm.name}
+                            onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">Time(s)</label>
+                          <div className="space-y-1.5">
+                            {editForm.times.map((t, ti) => (
+                              <div key={ti} className="flex items-center gap-2">
+                                <input type="time" value={t}
+                                  onChange={e => updateTime(ti, e.target.value)}
+                                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                                {editForm.times.length > 1 && (
+                                  <button type="button" onClick={() => removeTime(ti)}
+                                    className="text-slate-300 hover:text-red-500 transition p-1">
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button type="button" onClick={addTime}
+                              className="flex items-center gap-1 text-xs text-blue-600 font-semibold hover:text-blue-800 transition pt-0.5">
+                              <Plus size={13} /> Add Time
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-600 mb-2">Days</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {DAYS.map(day => (
+                              <button key={day} type="button" onClick={() => toggleDay(day)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition
+                                  ${editForm.days.includes(day) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
+                                {day}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={saveEdit}
+                            className="flex-1 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">
+                            Save
+                          </button>
+                          <button onClick={() => { setEditIdx(null); setEditForm(null) }}
+                            className="px-4 py-2 bg-slate-100 text-slate-600 text-xs font-semibold rounded-lg hover:bg-slate-200 transition">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
+                          <Pill className="text-blue-600" size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
+                          <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}</p>
+                        </div>
+                        <button onClick={() => startEdit(i)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition" aria-label="Edit">
+                          <Clipboard size={15} />
+                        </button>
+                        <button onClick={() => onUpdateMeds(profile.meds.filter((_, idx) => idx !== i))}
+                          className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Condition Routines */}
+          {allCondTasks.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Daily Routines — {profile.condition}</p>
+              <div className="space-y-2">
+                {allCondTasks.map(task => {
+                  const isDeleted = deletedRoutines.includes(task.id)
+                  return (
+                    <div key={task.id} className={`flex items-center gap-3 p-3 rounded-xl border ${isDeleted ? 'bg-red-50 border-red-100 opacity-60' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDeleted ? 'bg-red-100' : 'bg-green-100'}`}>
+                        <Activity className={isDeleted ? 'text-red-400' : 'text-green-600'} size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${isDeleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.label}</p>
+                        <p className="text-xs text-slate-400">{isDeleted ? 'Removed' : 'Daily routine'}</p>
+                      </div>
+                      {isDeleted ? (
+                        <button onClick={() => onUpdateRoutines(deletedRoutines.filter(id => id !== task.id))}
+                          className="text-xs font-semibold px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50 transition">
+                          Restore
+                        </button>
+                      ) : (
+                        <button onClick={() => onUpdateRoutines([...deletedRoutines, task.id])}
+                          className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 flex gap-3 pt-2">
+          <button onClick={onAddNew}
+            className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2">
+            <Plus size={16} /> Add New Schedule
+          </button>
+          <button onClick={onClose}
+            className="px-4 py-2.5 bg-slate-100 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-200 transition">
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Schedule Tab ──────────────────────────────────────────────────────────────
 function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdateRoutines }) {
   const [showManage, setShowManage] = useState(false)
@@ -217,9 +428,9 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
   const deletedRoutines = profile.deletedRoutines || []
   const condTasks = allCondTasks.filter(t => !deletedRoutines.includes(t.id))
 
-  // Filter meds that are scheduled for the selected day
+  // Filter meds that are scheduled for the selected day; show all meds on today
   const medTasks = profile.meds
-    .filter(m => m.days.includes(selectedDayName))
+    .filter(m => selectedDay.isToday || m.days.includes(selectedDayName))
     .map(m => ({ id: `med_${m.name}`, label: `Take ${m.name}`, time: m.time, type: 'med' }))
   const allTasks = [...medTasks, ...condTasks]
 
@@ -328,96 +539,22 @@ function ScheduleTab({ profile, checked, onToggle, setTab, onUpdateMeds, onUpdat
 
       {/* Manage Schedules Modal */}
       {showManage && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4" role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold text-slate-900">Manage Schedules</h2>
-              <button onClick={() => setShowManage(false)} className="text-slate-400 hover:text-slate-600" aria-label="Close">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-              {/* Medications */}
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Medications</p>
-                {profile.meds.length === 0 ? (
-                  <p className="text-slate-400 text-sm py-2">No medications added yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {profile.meds.map((m, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0">
-                          <Pill className="text-blue-600" size={14} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
-                          <p className="text-xs text-slate-400">{fmtTime(m.time)} · {m.days.join(', ')}</p>
-                        </div>
-                        <button onClick={() => handleDeleteMed(i)}
-                          className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Condition Routines */}
-              {allCondTasks.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Daily Routines — {profile.condition}</p>
-                  <div className="space-y-2">
-                    {allCondTasks.map(task => {
-                      const isDeleted = deletedRoutines.includes(task.id)
-                      return (
-                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-xl border ${isDeleted ? 'bg-red-50 border-red-100 opacity-60' : 'bg-slate-50 border-slate-200'}`}>
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isDeleted ? 'bg-red-100' : 'bg-green-100'}`}>
-                            <Activity className={isDeleted ? 'text-red-400' : 'text-green-600'} size={14} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-semibold ${isDeleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.label}</p>
-                            <p className="text-xs text-slate-400">{isDeleted ? 'Removed' : 'Daily routine'}</p>
-                          </div>
-                          {isDeleted ? (
-                            <button onClick={() => onUpdateRoutines(deletedRoutines.filter(id => id !== task.id))}
-                              className="text-xs font-semibold px-2 py-1 rounded-lg border border-green-200 text-green-600 hover:bg-green-50 transition">
-                              Restore
-                            </button>
-                          ) : (
-                            <button onClick={() => handleDeleteRoutine(task.id)}
-                              className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition" aria-label="Delete">
-                              <Trash2 size={16} />
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex gap-3">
-              <button onClick={() => { setShowManage(false); setTab('profile') }}
-                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2">
-                <Plus size={16} /> Add New Schedule
-              </button>
-              <button onClick={() => setShowManage(false)}
-                className="px-4 py-2.5 bg-slate-100 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-200 transition">
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
+        <ManageModal
+          profile={profile}
+          allCondTasks={allCondTasks}
+          deletedRoutines={deletedRoutines}
+          onUpdateMeds={onUpdateMeds}
+          onUpdateRoutines={onUpdateRoutines}
+          onClose={() => setShowManage(false)}
+          onAddNew={() => { setShowManage(false); setTab('profile') }}
+        />
       )}
     </div>
   )
 }
 
 // ── Health Logs Tab ───────────────────────────────────────────────────────────
-function HealthLogsTab() {
+function HealthLogsTab({ username, todayDate }) {
   const [vitals, setVitals] = useState({ sugar: '', heartRate: '', weight: '' })
   const [mood, setMood] = useState('')
   const [notes, setNotes] = useState('')
@@ -428,7 +565,18 @@ function HealthLogsTab() {
     { label: 'Pain', emoji: '😣' }, { label: 'Dizzy', emoji: '😵' },
   ]
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2500) }
+  const handleSave = () => {
+    const existing = loadFromLocalStorage(`careCompanionHistory_${username}_${todayDate}`) || {}
+    saveToLocalStorage(`careCompanionHistory_${username}_${todayDate}`, {
+      ...existing,
+      vitalsLogged: true,
+      vitals,
+      mood,
+      notes,
+    })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -490,39 +638,136 @@ function HealthLogsTab() {
 }
 
 // ── Insights Tab ─────────────────────────────────────────────────────────────
-function InsightsTab({ profile, checked }) {
+function InsightsTab({ profile, checked, streak, username }) {
   const [view, setView] = useState('weekly')
+  const [tooltipBadge, setTooltipBadge] = useState(null)
+
   const deletedRoutines = profile.deletedRoutines || []
   const condTasks = (CONDITION_TASKS[profile.condition] || []).filter(t => !deletedRoutines.includes(t.id))
-  const medTasks = profile.meds.map(m => ({ id: `med_${m.name}` }))
-  const allTasks = [...condTasks, ...medTasks]
+  const totalMeds = profile.meds.length
+  const doneMeds = profile.meds.filter(m => checked[`med_${m.name}`]).length
+  const doneRoutine = condTasks.filter(t => checked[t.id]).length
+  const total = totalMeds + condTasks.length
   const done = Object.values(checked).filter(Boolean).length
-  const total = allTasks.length
   const todayPct = total > 0 ? Math.round((done / total) * 100) : 0
+  const todayMedPct = totalMeds > 0 ? Math.round((doneMeds / totalMeds) * 100) : 0
+  const todayRoutinePct = condTasks.length > 0 ? Math.round((doneRoutine / condTasks.length) * 100) : 0
+  const today = new Date()
+  const todayStr = today.toISOString().slice(0, 10)
+
+  const getHistory = (dateStr) => loadFromLocalStorage(`careCompanionHistory_${username}_${dateStr}`) || {}
 
   const weeklyData = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) => {
-    const isToday = i === (new Date().getDay() === 0 ? 6 : new Date().getDay() - 1)
+    const jsDay = (i + 1) % 7
+    const diff = jsDay - today.getDay()
+    const date = new Date(today); date.setDate(today.getDate() + diff)
+    const dateStr = date.toISOString().slice(0, 10)
+    const isToday = dateStr === todayStr
+    const h = isToday ? {} : getHistory(dateStr)
     return {
       day: d,
-      Meds: isToday ? Math.min(todayPct, 100) : Math.floor(55 + Math.random() * 45),
-      Routine: isToday ? Math.min(todayPct, 100) : Math.floor(50 + Math.random() * 50),
+      Meds: isToday ? todayMedPct : (h.medPct ?? null),
+      Routine: isToday ? todayRoutinePct : (h.routinePct ?? null),
     }
   })
 
-  const monthlyData = ['Wk 1','Wk 2','Wk 3','Wk 4'].map((w, i) => ({
-    week: w,
-    Meds: i < 3 ? Math.floor(60 + Math.random() * 40) : todayPct,
-    Routine: i < 3 ? Math.floor(55 + Math.random() * 45) : todayPct,
-  }))
+  const monthlyData = Array.from({ length: 4 }, (_, i) => {
+    const pcts = Array.from({ length: 7 }, (_, j) => {
+      const date = new Date(today)
+      date.setDate(today.getDate() - today.getDay() - (3 - i) * 7 + j)
+      const dateStr = date.toISOString().slice(0, 10)
+      const isToday = dateStr === todayStr
+      const h = isToday ? { medPct: todayMedPct, routinePct: todayRoutinePct } : getHistory(dateStr)
+      return h.medPct != null ? { med: h.medPct, routine: h.routinePct ?? 0 } : null
+    }).filter(Boolean)
+    return {
+      week: `Wk ${i + 1}`,
+      Meds: pcts.length ? Math.round(pcts.reduce((s, p) => s + p.med, 0) / pcts.length) : null,
+      Routine: pcts.length ? Math.round(pcts.reduce((s, p) => s + p.routine, 0) / pcts.length) : null,
+    }
+  })
 
   const graphData = view === 'weekly' ? weeklyData : monthlyData
   const xKey = view === 'weekly' ? 'day' : 'week'
 
+  const checkDays = (n, fn) => {
+    for (let i = 0; i < n; i++) {
+      const date = new Date(today); date.setDate(today.getDate() - i)
+      const dateStr = date.toISOString().slice(0, 10)
+      const isToday = dateStr === todayStr
+      const h = isToday ? { medPct: todayMedPct, routinePct: todayRoutinePct, pct: todayPct, missedMeds: getMissedMeds(profile.meds).length > 0 } : getHistory(dateStr)
+      if (!fn(h)) return false
+    }
+    return true
+  }
+
   const badges = [
-    { icon: '🏅', title: '7 Days', sub: '100% Meds', color: 'bg-blue-50 border-blue-200' },
-    { icon: '⏰', title: 'Punctual', sub: 'Pete', color: 'bg-green-50 border-green-200' },
-    { icon: '📋', title: 'Log', sub: 'Master', color: 'bg-purple-50 border-purple-200' },
+    {
+      icon: '🏅', title: '7-Day Streak', sub: 'Tasks 7 days in a row',
+      unlocked: streak >= 7,
+      condition: 'Complete all daily tasks for 7 consecutive days',
+    },
+    {
+      icon: '💊', title: 'Med Master', sub: '100% meds 3 days',
+      unlocked: (() => { let c = 0; for (let i = 0; i < 7; i++) { const d = new Date(today); d.setDate(today.getDate()-i); const s = d.toISOString().slice(0,10); const p = s===todayStr ? todayMedPct : (getHistory(s).medPct??0); if(p===100) c++; } return c>=3 })(),
+      condition: 'Achieve 100% medication completion for 3 days',
+    },
+    {
+      icon: '📋', title: 'Log Master', sub: 'Log vitals 5 days',
+      unlocked: (() => { let c = 0; for (let i = 0; i < 30; i++) { const d = new Date(today); d.setDate(today.getDate()-i); const s = d.toISOString().slice(0,10); if(getHistory(s).vitalsLogged) c++; } return c>=5 })(),
+      condition: 'Log your vitals on 5 different days',
+    },
+    {
+      icon: '🔥', title: '30-Day Streak', sub: 'Tasks 30 days in a row',
+      unlocked: streak >= 30,
+      condition: 'Complete all daily tasks for 30 consecutive days',
+    },
+    {
+      icon: '⏰', title: 'Punctual', sub: 'No missed meds 7 days',
+      unlocked: streak >= 7 && checkDays(7, h => !h.missedMeds),
+      condition: 'Have zero missed medications for 7 consecutive days',
+    },
+    {
+      icon: '🌟', title: 'Perfect Week', sub: '100% all 7 days',
+      unlocked: checkDays(7, h => (h.pct ?? 0) >= 100),
+      condition: 'Achieve 100% task completion every day for a full week',
+    },
   ]
+
+  const handleExportPDF = () => {
+    const win = window.open('', '_blank')
+    win.document.write(`
+      <html><head><title>CareCompanion Health Report</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#1e293b}
+        h1{color:#2563eb}h2{color:#475569;border-bottom:1px solid #e2e8f0;padding-bottom:8px;margin-top:24px}
+        table{width:100%;border-collapse:collapse;margin:12px 0}
+        th{background:#f1f5f9;text-align:left;padding:8px 12px;font-size:13px}
+        td{padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px}
+        .badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:12px;margin:4px}
+        .unlocked{background:#dbeafe;color:#1d4ed8}.locked{background:#f1f5f9;color:#94a3b8}
+      </style></head><body>
+      <h1>CareCompanion Health Report</h1>
+      <p>Patient: <strong>${profile.name}</strong> &nbsp;|&nbsp; Age: ${profile.age} &nbsp;|&nbsp; Condition: ${profile.condition}</p>
+      <p>Generated: ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</p>
+      <h2>Today's Adherence</h2>
+      <table><tr><th>Category</th><th>Completion</th></tr>
+        <tr><td>Medications</td><td>${todayMedPct}%</td></tr>
+        <tr><td>Daily Routines</td><td>${todayRoutinePct}%</td></tr>
+        <tr><td>Overall</td><td>${todayPct}%</td></tr>
+      </table>
+      <h2>Medications</h2>
+      <table><tr><th>Name</th><th>Time</th><th>Days</th><th>Status</th></tr>
+        ${profile.meds.map(m => `<tr><td>${m.name}</td><td>${m.time||'—'}</td><td>${m.days.join(', ')}</td><td>${checked[`med_${m.name}`]?'✓ Done':'Pending'}</td></tr>`).join('')}
+      </table>
+      <h2>Current Streak</h2><p>🔥 ${streak} day${streak!==1?'s':''}</p>
+      <h2>Badges Earned</h2>
+      <div>${badges.map(b=>`<span class="badge ${b.unlocked?'unlocked':'locked'}">${b.icon} ${b.title}</span>`).join('')}</div>
+      </body></html>
+    `)
+    win.document.close()
+    win.print()
+  }
 
   return (
     <div className="space-y-5">
@@ -530,7 +775,7 @@ function InsightsTab({ profile, checked }) {
         {/* Bar Chart */}
         <div className="md:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
           <div className="flex items-center justify-between mb-5">
-            <h3 className="font-bold text-slate-800">Adherence (Last 7 Days)</h3>
+            <h3 className="font-bold text-slate-800">Adherence History</h3>
             <div className="flex gap-2">
               {['weekly','monthly'].map(v => (
                 <button key={v} onClick={() => setView(v)}
@@ -546,7 +791,7 @@ function InsightsTab({ profile, checked }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
               <YAxis domain={[0,100]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} unit="%" />
-              <Tooltip formatter={v => `${v}%`} contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e2e8f0' }} />
+              <Tooltip formatter={v => v !== null ? `${v}%` : 'No data'} contentStyle={{ borderRadius: 8, fontSize: 12, border: '1px solid #e2e8f0' }} />
               <Bar dataKey="Meds" fill="#2563eb" radius={[4,4,0,0]} />
               <Bar dataKey="Routine" fill="#93c5fd" radius={[4,4,0,0]} />
             </BarChart>
@@ -555,7 +800,7 @@ function InsightsTab({ profile, checked }) {
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-600 inline-block" /> Meds</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-300 inline-block" /> Routine</span>
           </div>
-          <p className="text-xs text-slate-400 mt-3">Historical data · {new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</p>
+          <p className="text-xs text-slate-400 mt-3">Based on saved daily data · {new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</p>
         </div>
 
         {/* Streak Badges + Export */}
@@ -564,10 +809,22 @@ function InsightsTab({ profile, checked }) {
             <h3 className="font-bold text-slate-800 mb-4">Streak Badges</h3>
             <div className="grid grid-cols-3 gap-2">
               {badges.map(b => (
-                <div key={b.title} className={`flex flex-col items-center p-3 rounded-xl border text-center ${b.color}`}>
-                  <span className="text-2xl mb-1">{b.icon}</span>
-                  <p className="text-xs font-bold text-slate-700">{b.title}</p>
-                  <p className="text-xs text-slate-500">{b.sub}</p>
+                <div key={b.title} className="relative"
+                  onMouseEnter={() => !b.unlocked && setTooltipBadge(b.title)}
+                  onMouseLeave={() => setTooltipBadge(null)}
+                  onClick={() => !b.unlocked && setTooltipBadge(tooltipBadge === b.title ? null : b.title)}>
+                  <div className={`flex flex-col items-center p-3 rounded-xl border text-center transition
+                    ${b.unlocked ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-200 grayscale opacity-50 cursor-pointer'}`}>
+                    <span className="text-2xl mb-1">{b.icon}</span>
+                    <p className={`text-xs font-bold ${b.unlocked ? 'text-slate-700' : 'text-slate-400'}`}>{b.title}</p>
+                    <p className={`text-xs ${b.unlocked ? 'text-slate-500' : 'text-slate-400'}`}>{b.sub}</p>
+                  </div>
+                  {!b.unlocked && tooltipBadge === b.title && (
+                    <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-40 bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg text-center pointer-events-none">
+                      🔒 {b.condition}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -575,10 +832,10 @@ function InsightsTab({ profile, checked }) {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
             <h3 className="font-bold text-slate-800 mb-2">Export Summary</h3>
             <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-              Generate a health summary report to share with your doctor, including medication adherence and vitals.
+              Generate a health summary PDF to share with your doctor, including medication adherence and vitals.
             </p>
-            <button className="w-full py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition">
-              Generate PDF / JSON for Doctor
+            <button onClick={handleExportPDF} className="w-full py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition">
+              Export PDF for Doctor
             </button>
           </div>
         </div>
@@ -586,6 +843,7 @@ function InsightsTab({ profile, checked }) {
     </div>
   )
 }
+
 
 // Helper to get today's date string for localStorage keys
 const getTodayDateString = () => new Date().toISOString().slice(0, 10);
@@ -611,11 +869,11 @@ export default function Dashboard({ profile, user, onLogout }) {
     const savedChecked = loadFromLocalStorage(`careCompanionCheckedTasks_${username}_${todayDate}`);
     return savedChecked || {};
   });
-  const [streak, setStreak] = useState(() => {
-    const savedStreak = loadFromLocalStorage(`careCompanionStreak_${username}`);
-    return savedStreak !== undefined ? savedStreak : 1;
-  });
+  const [streak, setStreak] = useState(() => computeStreak((user?.name || '').toLowerCase()))
   const [showPopup, setShowPopup] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [medAlert, setMedAlert] = useState(null) // { med, taskId }
+  const snoozeUntilRef = useRef({}) // { taskId: timestamp }
   const [popupShownToday, setPopupShownToday] = useState(() => {
     const savedPopupShown = loadFromLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`);
     return savedPopupShown || false;
@@ -628,15 +886,68 @@ export default function Dashboard({ profile, user, onLogout }) {
   // Save states to localStorage whenever they change
   useEffect(() => {
     saveToLocalStorage(`careCompanionCheckedTasks_${username}_${todayDate}`, checked);
+    // Save daily history for graphs
+    const deletedRoutines = currentProfile.deletedRoutines || []
+    const condTasks = (CONDITION_TASKS[currentProfile.condition] || []).filter(t => !deletedRoutines.includes(t.id))
+    const totalMeds = currentProfile.meds.length
+    const doneMeds = currentProfile.meds.filter(m => checked[`med_${m.name}`]).length
+    const doneRoutine = condTasks.filter(t => checked[t.id]).length
+    const total = totalMeds + condTasks.length
+    const done = Object.values(checked).filter(Boolean).length
+    const existing = loadFromLocalStorage(`careCompanionHistory_${username}_${todayDate}`) || {}
+    saveToLocalStorage(`careCompanionHistory_${username}_${todayDate}`, {
+      ...existing,
+      pct: total > 0 ? Math.round((done / total) * 100) : 0,
+      medPct: totalMeds > 0 ? Math.round((doneMeds / totalMeds) * 100) : 0,
+      routinePct: condTasks.length > 0 ? Math.round((doneRoutine / condTasks.length) * 100) : 0,
+      missedMeds: getMissedMeds(currentProfile.meds).length > 0,
+    })
+    // Recompute streak from history
+    setStreak(computeStreak(username))
   }, [checked, username, todayDate]);
 
-  useEffect(() => {
-    saveToLocalStorage(`careCompanionStreak_${username}`, streak);
-  }, [streak, username]);
 
   useEffect(() => {
     saveToLocalStorage(`careCompanionPopupShown_${username}_${todayDate}`, popupShownToday);
   }, [popupShownToday, username, todayDate]);
+
+  // Med alert interval — checks every 30s if a med is due and not yet done/snoozed
+  useEffect(() => {
+    const check = () => {
+      if (medAlert) return // already showing one
+      const now = new Date()
+      const todayDay = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getDay()]
+      for (const med of currentProfile.meds) {
+        if (!med.time || !med.days.includes(todayDay)) continue
+        const taskId = `med_${med.name}`
+        if (checked[taskId]) continue // already done
+        const [h, m] = med.time.split(':').map(Number)
+        const due = new Date(); due.setHours(h, m, 0, 0)
+        const diffMs = now - due
+        if (diffMs < 0) continue // not yet due
+        const snoozeUntil = snoozeUntilRef.current[taskId] || 0
+        if (Date.now() < snoozeUntil) continue // snoozed
+        // Due and not snoozed — show alert
+        setMedAlert({ med, taskId })
+        return
+      }
+    }
+    check() // run immediately on mount / profile change
+    const id = setInterval(check, 30000)
+    return () => clearInterval(id)
+  }, [currentProfile.meds, checked, medAlert])
+
+  const handleMedAlertDone = () => {
+    if (!medAlert) return
+    setChecked(prev => ({ ...prev, [medAlert.taskId]: true }))
+    setMedAlert(null)
+  }
+
+  const handleMedAlertSnooze = () => {
+    if (!medAlert) return
+    snoozeUntilRef.current[medAlert.taskId] = Date.now() + 5 * 60 * 1000
+    setMedAlert(null)
+  }
 
   const handleProfileUpdate = (updatedData) => {
     const users = loadFromLocalStorage('careCompanionUsers') || {};
@@ -743,10 +1054,52 @@ export default function Dashboard({ profile, user, onLogout }) {
             <p className="text-xs text-slate-400">{new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="relative p-2 rounded-xl hover:bg-slate-100 transition" aria-label="Notifications">
-              <Bell size={20} className="text-slate-500" />
-              {missedMeds.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />}
-            </button>
+            <div className="relative">
+              <button onClick={() => setShowNotifications(n => !n)}
+                className="relative p-2 rounded-xl hover:bg-slate-100 transition" aria-label="Notifications">
+                <Bell size={20} className="text-slate-500" />
+                {(missedMeds.length > 0 || upcoming) && <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />}
+              </button>
+              {showNotifications && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <p className="text-sm font-bold text-slate-800">Notifications</p>
+                    <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-slate-600">
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto">
+                    {missedMeds.length === 0 && !upcoming ? (
+                      <div className="px-4 py-6 text-center text-slate-400 text-sm">
+                        <Bell size={24} className="mx-auto mb-2 opacity-30" />
+                        No notifications right now
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-50">
+                        {missedMeds.map(m => (
+                          <div key={m.name} className="flex items-start gap-3 px-4 py-3 bg-red-50">
+                            <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
+                            <div>
+                              <p className="text-sm font-semibold text-red-700">Missed Dose</p>
+                              <p className="text-xs text-red-500">{m.name} was due at {fmtTime(m.time)}</p>
+                            </div>
+                          </div>
+                        ))}
+                        {upcoming && (
+                          <div className="flex items-start gap-3 px-4 py-3 bg-blue-50">
+                            <Clock className="text-blue-500 shrink-0 mt-0.5" size={16} />
+                            <div>
+                              <p className="text-sm font-semibold text-blue-700">Upcoming Dose</p>
+                              <p className="text-xs text-blue-500">{upcoming.name} in {upcoming.diffMin} mins at {fmtTime(upcoming.time)}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
                 {(user?.name || currentProfile.name).charAt(0).toUpperCase()}
@@ -795,14 +1148,14 @@ export default function Dashboard({ profile, user, onLogout }) {
                 </div>
                 {/* Calendar */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-                  <MiniCalendar streak={streak} />
+                  <MiniCalendar username={username} />
                 </div>
               </div>
             </div>
           )}
           {tab === 'schedule' && <ScheduleTab profile={currentProfile} checked={checked} onToggle={toggle} setTab={handleTabChange} onUpdateMeds={handleMedsUpdate} onUpdateRoutines={handleRoutinesUpdate} />}
-          {tab === 'logs' && <HealthLogsTab />}
-          {tab === 'insights' && <InsightsTab profile={currentProfile} checked={checked} />}
+          {tab === 'logs' && <HealthLogsTab username={username} todayDate={todayDate} />}
+          {tab === 'insights' && <InsightsTab profile={currentProfile} checked={checked} streak={streak} username={username} />}
           {tab === 'profile' && <ProfileForm user={currentProfile} onSubmit={handleProfileUpdate} />}
         </main>
       </div>
@@ -821,10 +1174,37 @@ export default function Dashboard({ profile, user, onLogout }) {
             <p className="text-slate-500 text-sm mb-6 leading-relaxed">
               Amazing work! You've completed all your tasks and medications for today. Every day counts on your recovery journey.
             </p>
-            <button onClick={() => { setShowPopup(false); setStreak(s => s + 1); setPopupShownToday(true); }}
+            <button onClick={() => { setShowPopup(false); setPopupShownToday(true); }}
               className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition text-base">
               Keep Going 🚀
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Med Alert Popup */}
+      {medAlert && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] px-4" role="alertdialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center animate-bounce-once">
+            <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-blue-200">
+              <Pill className="text-blue-500" size={38} />
+            </div>
+            <p className="text-xs font-bold text-blue-500 uppercase tracking-widest mb-1">Medication Reminder</p>
+            <h2 className="text-2xl font-black text-slate-900 mb-1">{medAlert.med.name}</h2>
+            <p className="text-slate-500 text-sm mb-6">
+              It's time to take your medication.<br />
+              <span className="font-semibold text-slate-700">{fmtTime(medAlert.med.time)}</span>
+            </p>
+            <div className="flex gap-3">
+              <button onClick={handleMedAlertSnooze}
+                className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition text-sm">
+                ⏰ Snooze 5 min
+              </button>
+              <button onClick={handleMedAlertDone}
+                className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition text-sm">
+                ✓ Done
+              </button>
+            </div>
           </div>
         </div>
       )}
